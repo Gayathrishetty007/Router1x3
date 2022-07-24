@@ -1,85 +1,26 @@
-module router_reg(input clk,resetn,pkt_valid,fifo_full,detect_add,ld_state,laf_state,full_state,lfd_state,rst_int_reg,
-			input [7:0] data_in,
-			output reg err, parity_done,low_pkt_valid,
-			output reg [7:0] dout);
-			reg [7:0] header_byte,fifo_full_byte,internal_parity,packet_parity;
+//RTL for Router1x3_Register
+module router_reg #(parameter WIDTH = 8) (input clock, resetn, pkt_valid, fifo_full, rst_int_reg, detect_add, ld_state, laf_state, full_state, lfd_state,
+                                          input [(WIDTH-1):0] data_in,
+				                          output reg parity_done, low_pkt_valid, err,
+				                          output reg [(WIDTH-1):0] dout);
 
-always@(posedge clk)
-begin
-	if(~resetn)
-		header_byte<=8'b0;
-	else if(detect_add && pkt_valid && data_in[1:0]!=2'b11)
-		header_byte<=data_in;
-end
+  // Internal Registers within Register block
+  reg [(WIDTH-1):0] header_byte_reg, fifo_full_state_byte_reg, internal_parity_byte_reg, packet_parity_byte_reg;
+  
+  always@(posedge clock)
+    begin
+      err <= (~resetn) ? 1'b0: (parity_done) ? (internal_parity_byte_reg != packet_parity_byte_reg) : 1'b0;
+	  low_pkt_valid <= (~resetn) ? 1'b0 : (rst_int_reg) ? 1'b0 : (ld_state && ~pkt_valid) ? 1'b1 : low_pkt_valid;
 
-always@(posedge clk)
-begin
-	if(~resetn)
-		fifo_full_byte<=8'b0;
-	else if(ld_state && fifo_full )
-		fifo_full_byte<=data_in;
-end
+      parity_done <= (~resetn) ? 1'b0 : (detect_add) ? 1'b0 : ((ld_state && ~fifo_full && ~pkt_valid) || (laf_state && low_pkt_valid && ~parity_done)) ? 1'b1 : parity_done;
+	  
+	  dout <= (~resetn) ? 8'b0 : (lfd_state) ? header_byte_reg : (ld_state && ~fifo_full) ? data_in : (parity_done && (internal_parity_byte_reg == packet_parity_byte_reg)) ? packet_parity_byte_reg : (laf_state) ? fifo_full_state_byte_reg : dout;
+	  
+	  header_byte_reg <= (~resetn) ? 8'b0 : (detect_add && pkt_valid && data_in[1:0] != 2'b11) ? data_in : header_byte_reg;
+	  fifo_full_state_byte_reg <= (~resetn) ? 8'b0 : (ld_state && fifo_full) ? data_in : fifo_full_state_byte_reg;
 
-always@(posedge clk)
-begin
-	if(~resetn)
-		internal_parity<=8'b0;
-	else if(detect_add )
-		internal_parity<=8'b0;
-	else if(lfd_state && pkt_valid && ~full_state)
-		internal_parity<=internal_parity ^ header_byte;
-	else if(ld_state && pkt_valid && ~full_state)
-		internal_parity<=internal_parity ^ data_in;
-end
+      internal_parity_byte_reg <= (~resetn) ? 8'b0 : (detect_add) ? 8'b0 : (lfd_state) ? internal_parity_byte_reg ^ header_byte_reg : (~full_state && ld_state && pkt_valid) ? internal_parity_byte_reg ^ data_in : internal_parity_byte_reg;
 
-always@(posedge clk)
-begin
-	if(~resetn)
-		packet_parity<=8'b0;
-	else if(ld_state && ~pkt_valid )
-		packet_parity<=data_in;
-end
-
-always@(posedge clk)
-begin
-	if(~resetn)
-		parity_done<=0;
-	else if(detect_add)
-		parity_done<=0;
-	else if((ld_state && ~pkt_valid && ~fifo_full) || (laf_state && low_pkt_valid && ~parity_done))
-		parity_done<=1;
-end
-
-always@(posedge clk)
-begin
-	if(~resetn)
-		dout<=0;
-	else if(lfd_state )
-		dout<=header_byte;
-	else if(ld_state && ~fifo_full)
-		dout<=data_in;
-	else if(laf_state)
-		dout<=fifo_full_byte;
-end
-
-always@(posedge clk)
-begin
-	if(~resetn || rst_int_reg)
-		low_pkt_valid<=0;
-	else if(ld_state && ~pkt_valid )
-		low_pkt_valid<=1;
-end
-
-always@(posedge clk)
-begin
-	if(~resetn)
-		err<=0;
-	else if(parity_done )
-	begin
-		if(internal_parity != packet_parity)
-			err<=1;
-		else
-			err<=0;
+      packet_parity_byte_reg <= (~resetn) ? 8'b0 : ((ld_state && ~fifo_full && ~pkt_valid) || (laf_state && low_pkt_valid && ~parity_done)) ? data_in : packet_parity_byte_reg;
 	end
-end
 endmodule
